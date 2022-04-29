@@ -1,0 +1,72 @@
+---
+title: "eda_jack"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(here)
+
+
+```
+
+## Load Data
+
+```{r}
+# Loading
+library("readxl")
+# xls files
+train<- read_excel("./data/StudentData.xlsx")
+test <-read_excel('./data/StudentEvaluation.xlsx')
+```
+
+
+
+## Missing Values
+
+```{r}
+library(naniar)
+vis_miss(train)
+```
+
+```{r}
+library(UpSetR)
+gg_miss_upset(train)
+```
+## MCAR test (missing completely at random)
+
+```{r}
+mcar_test(train)
+```
+
+high test statistic low p-val means there is a pattern to the missingness
+
+```{r}
+train%>%
+  add_prop_miss()%>%
+  head()
+```
+```{r}
+library(rpart)
+library(rpart.plot)
+
+train%>%
+  add_prop_miss()%>%
+  rpart(prop_miss_all~.,data = .)%>%
+  prp(type = 4, extra = 101, prefix = 'Prop. Miss = ')
+```
+
+```{r}
+library(corrplot)
+
+correlated_cols<-cor(train%>%select(-"Brand Code")%>%na.omit())%>%as.data.frame()%>%select(PH)%>%filter(abs(PH)>.3)%>%rownames()
+
+
+#corrplot(cor(train%>%select(c(PH, correlated_cols))%>%na.omit()))
+library(GGally)
+ggpairs(train%>%select(c(PH, correlated_cols)))
+```
