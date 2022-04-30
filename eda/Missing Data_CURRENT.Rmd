@@ -1,0 +1,169 @@
+---
+title: "Missing Data"
+author: "Jack Wright"
+date: "4/29/2022"
+output: html_document
+---
+
+## Load files
+
+```{r}
+library(tidyverse)
+library(readxl)
+train_data<-read_xlsx('./data/StudentData.xlsx')
+```
+
+
+
+
+##  Missing Data
+
+```{r}
+library(visdat)
+vis_dat(train_data)
+```
+
+The missing data does not look random. Lets take a closer look at how the missing data is distributed
+
+```{r}
+library(naniar)
+gg_miss_var(train_data)
+```
+
+MFR and Brand Code contain most of the missing data. 
+
+
+Little's Missing Completely at Random test will give us some insight if there are patterns in the missing data.
+
+```{r}
+mcar_test(train_data)
+```
+
+With a high test statistic and low p-value we can conclude that there is structure to the missing data. 
+
+Remove the two most missing, and retest for MCAR
+
+```{r}
+mcar_test(train_data%>%select(-c(MFR,`Brand Code`,`Filler Speed`)))
+```
+
+
+We can conclude that there is some structure to the missing data
+
+
+
+## MFR Missing Data 
+
+
+```{r}
+cor(train_data%>%select(-`Brand Code`)%>%na.omit())%>%as.data.frame()%>%arrange(desc(MFR))%>%select(MFR)%>%head()
+```
+
+
+
+Our most missing predictor `MFR` has a 95% correlation with `Filler Speed`. 
+
+```{r}
+train_data%>%
+  mutate(both_miss = case_when(
+    (is.na(MFR) & is.na(`Filler Speed`) )~TRUE,
+         TRUE~FALSE)
+  )%>%
+  summarize("both missing" = sum(both_miss), 'MFR missing' = sum(is.na(`Filler Speed`)))
+```
+
+
+94% of the time when `Filler Speed` is missing, `MFR` is also missing. The best option is to drop MFR and listwise delete the missing values from `Filler Speed`
+
+## Missing Data in `Brand Code`
+
+```{r}
+cat_impute_df<-train_data%>%na.omit()%>%select(-c(MFR, PH))%>%mutate(`Brand Code` = as.factor(`Brand Code`))
+brand_split<-split
+
+code_count<-
+  cat_impute_df%>%
+  count(`Brand Code`)
+
+code_count
+```
+
+```{r}
+library(tidymodels)
+library(janitor)
+cat_impute_df<-clean_names(cat_impute_df)
+brand_split<-initial_split(cat_impute_df)
+brand_train<-training(brand_split)
+brand_test<-testing(brand_split)
+```
+
+Note that there is a class imbalance in the Brand Codes so  it is important to stratify before predicting
+
+
+```{r}
+
+tree_spec<-decision_tree()%>%
+  set_engine('rpart')%>%
+  set_mode('classification')
+tune_spec<-
+  decision_tree(
+    cost_complexity = tune(),
+    tree_depth = tune()
+  )%>%
+  set_engine("rpart") %>% 
+  set_mode("classification")
+tree_grid<- grid_regular(cost_complexity(),
+                         tree_depth(),
+                         levels = 5)
+brand_folds<-vfold_cv(brand_train , v = 10)
+brand_folds
+```
+
+```{r}
+
+set.seed(123)
+tree_wf<-workflow()%>%
+  add_model(tune_spec)%>%
+  add_formula(brand_code~.)
+```
+
+
+```{r}
+tree_res<-
+  tree_wf%>%
+  tune_grid(
+    resamples = brand_folds,
+    grid = tree_grid
+  )
+```
+
+
+
+```{r}
+best_tree<-tree_res%>%
+  select_best('accuracy')
+
+final_wf<-
+  tree_wf%>%
+  finalize_workflow(best_tree)
+```
+
+
+```{r}
+final_fit<-
+  final_wf%>%
+  last_fit(brand_split)
+final_fit%>%
+  collect_metrics()
+```
+
+
+`Brand Code` can be predicted with a high accuracy using the other predictors. It would be advisable to impute the missing `Brand Code` before modeling.
+
+
+
+
+## Remaining Missing Data
+
+dropping `MFR` and imputing `Brand Codes` accounts for 90% of the missing data, the most conservative method would be to listwise delete the remaining missing data. 
+
