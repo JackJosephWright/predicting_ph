@@ -61,9 +61,10 @@ ggplot(train_data, aes(x = PH))+geom_histogram()+ggtitle('Distribution of Respon
 library(dplyr)
 library(psych)
 library(car)
-#library(asbio)
+
 description<-psych::describe(train_data)
 ```
+
 
 
 ## Normality
@@ -107,11 +108,13 @@ There are 6 highly correlated predictors and can be found in the `correlated_pre
 ## PCA
 
 
+
 ```{r}
 library(tidymodels)
 pca_rec<-recipe(~., train_data%>%select(-'Brand Code')%>%select(-correlated_predictors))%>%
   update_role(PH, new_role = 'id')%>%
-  step_normalize(all_predictors())%>%
+  step_center(all_predictors())%>%
+  step_scale(all_predictors())%>%
   step_pca(all_predictors())
 pca_prep<-prep(pca_rec)
 ```
@@ -131,7 +134,11 @@ tidied_pca%>%
   labs(y = NULL)
 
 ```
+```{r}
+summary(prcomp(train_data%>%select(-`Brand Code`), scale = TRUE))
+```
 
+Looking at the percent of variance explained, we want to limit the total number of principle components used while maintaining a high amount of variance explained, so we will set the threshold for modeling to 90%. 
 
 ```{r}
 library(tidytext)

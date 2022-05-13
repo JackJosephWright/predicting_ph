@@ -26,6 +26,7 @@ Our EDA showed that a large number of the predictors were skewed, so we will cen
 ```{r}
 library(tidymodels)
 library(janitor)
+library(readxl)
 train_data<-as.data.frame(read_xlsx('C:\\Program Files\\GitHub\\predicting_ph\\data\\StudentData.xlsx'))
 #removing MFR
 train_data<-train_data%>%select(-MFR)%>%mutate(`Brand Code` = as.factor(`Brand Code`))
@@ -60,6 +61,9 @@ cs_rec<-
   base_rec%>%
   step_center%>%
   step_scale()
+pca_rec<-
+  base_rec%>%
+  step_pca(threshold = .90)
 
 #create resamples
 ph_folds<-vfold_cv(ph_train)
@@ -100,9 +104,14 @@ no_pre_proc<-
     preproc = list(base = base_rec),
     models = list(boost = boost_spec, rf = rf_spec)
   )
+pca_proc<-
+  workflow_set(
+    preproc = list(pca = pca_rec),
+    models = list(svm_pca = svm_r_spec , boost_pca = boost_spec , rf_pca = rf_spec , knn_pca = knn_spec)
+  )
 all_workflows<-
   bind_rows(no_pre_proc, cc)%>%
-  mutate(wflow_id = gsub('(center_scale_)|(base_)', '',wflow_id))
+  mutate(wflow_id = gsub('(center_scale_)|(base_)|(pca_)', '',wflow_id))
 ```
 
 
@@ -142,27 +151,77 @@ autoplot(race_results)
 ```{r}
 collect_metrics(race_results)
 ```
+```{r}
+race_results
+```
 
 ```{r}
-best_results<-
+best_results_rf<-
   race_results%>%
-  extract_workflow_set_result('nearest_neighbor')%>%
+  extract_workflow_set_result('rf')%>%
   select_best(metric = 'rmse')
 best_results
 ```
 
 ```{r}
-knn_test_results<-
+best_results_rf<-
   race_results%>%
-  extract_workflow('nearest_neighbor')%>%
-  finalize_workflow(best_results)%>%
+  extract_workflow_set_result('rf')%>%
+  select_best(metric = 'rmse')
+rf_test_results<-
+  race_results%>%
+  extract_workflow('rf')%>%
+  finalize_workflow(best_results_rf)%>%
   last_fit(split = ph_split)
-collect_metrics(knn_test_results)
+collect_metrics(rf_test_results)
 ```
 
 
 ```{r}
-knn_test_results%>%
+best_results_boost<-
+  race_results%>%
+  extract_workflow_set_result('boost')%>%
+  select_best(metric = 'rmse')
+boost_test_results<-
+  race_results%>%
+  extract_workflow('boost')%>%
+  finalize_workflow(best_results_boost)%>%
+  last_fit(split = ph_split)
+collect_metrics(boost_test_results)
+```
+
+
+
+```{r}
+best_results_knn<-
+  race_results%>%
+  extract_workflow_set_result('nearest_neighbor')%>%
+  select_best(metric = 'rmse')
+knn_test_results<-
+  race_results%>%
+  extract_workflow('nearest_neighbor')%>%
+  finalize_workflow(best_results_knn)%>%
+  last_fit(split = ph_split)
+collect_metrics(knn_test_results)
+
+```
+
+```{r}
+best_results_svm<-
+  race_results%>%
+  extract_workflow_set_result('SVM_radial')%>%
+  select_best(metric = 'rmse')
+svm_test_results<-
+  race_results%>%
+  extract_workflow('SVM_radial')%>%
+  finalize_workflow(best_results_svm)%>%
+  last_fit(split = ph_split)
+collect_metrics(svm_test_results)
+```
+
+
+```{r}
+rf_test_results%>%
   collect_predictions()%>%
   ggplot(aes(x = ph, y = .pred))+
   geom_abline(color = 'gray50', lty = 2)+
