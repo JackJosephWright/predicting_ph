@@ -1,16 +1,32 @@
 ---
-title: "Missing Data"
-author: "Jack Wright"
+title: "Predicting PH"
+author: "Jack Wright","Richard Zheng","Mario Pena"
 date: "4/29/2022"
 output: html_document
 ---
 
+
+```{r, include=FALSE}
+library(tidytext)
+library(tidyverse)
+library(readxl)
+library(openxlsx)
+library(finetune)
+library(visdat)
+library(naniar)
+library(tidymodels)
+library(janitor)
+library(psych)
+library(car)
+library(caret)
+```
+
 ## Load files
 
 ```{r}
-library(tidyverse)
-library(readxl)
-train_data<-read_xlsx('C:\\Program Files\\GitHub\\predicting_ph\\data\\StudentData.xlsx')
+train_data<-openxlsx::read.xlsx('https://github.com/schoolkidrich/CUNY_MSDS/blob/main/DATA_624/project/StudentData.xlsx?raw=true', sep.names=' ')
+
+train_data%>%head()
 ```
 
 
@@ -19,14 +35,12 @@ train_data<-read_xlsx('C:\\Program Files\\GitHub\\predicting_ph\\data\\StudentDa
 ##  Missing Data
 
 ```{r}
-library(visdat)
 vis_dat(train_data)
 ```
 
 The missing data does not look random. Lets take a closer look at how the missing data is distributed
 
 ```{r}
-library(naniar)
 gg_miss_var(train_data)
 ```
 
@@ -89,8 +103,6 @@ code_count
 ```
 
 ```{r}
-library(tidymodels)
-library(janitor)
 cat_impute_df<-clean_names(cat_impute_df)
 brand_split<-initial_split(cat_impute_df)
 brand_train<-training(brand_split)
@@ -120,7 +132,6 @@ brand_folds
 ```
 
 ```{r}
-
 set.seed(123)
 tree_wf<-workflow()%>%
   add_model(tune_spec)%>%
@@ -175,12 +186,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-```{r}
-library(tidyverse)
-library(readxl)
-train_data<-read_xlsx('./data/StudentData.xlsx')
-```
-
 
 ## Data Structure
 
@@ -222,10 +227,6 @@ ggplot(train_data, aes(x = PH))+geom_histogram()+ggtitle('Distribution of Respon
 
 
 ```{r}
-library(dplyr)
-library(psych)
-library(car)
-
 description<-psych::describe(train_data)
 ```
 
@@ -260,7 +261,6 @@ Most of the predictors range is 1, but a minority are  much larger. Depending on
 ## Highly Correlated Predictor Pairs
 
 ```{r}
-library(caret)
 correlated_predictors<-findCorrelation(cor(train_data%>%select(-'Brand Code')), names = TRUE)
 
 ```
@@ -274,7 +274,6 @@ There are 6 highly correlated predictors and can be found in the `correlated_pre
 
 
 ```{r}
-library(tidymodels)
 pca_rec<-recipe(~., train_data%>%select(-'Brand Code')%>%select(-correlated_predictors))%>%
   update_role(PH, new_role = 'id')%>%
   step_center(all_predictors())%>%
@@ -289,6 +288,7 @@ pca_prep<-prep(pca_rec)
 
 tidied_pca<-tidy(pca_prep, 2)
 
+#error here component does not exist
 tidied_pca%>%
   filter(component %in% paste0('PC', 1:5))%>%
   mutate(component = fct_inorder(component))%>%
@@ -305,8 +305,6 @@ summary(prcomp(train_data%>%select(-`Brand Code`), scale = TRUE))
 Looking at the percent of variance explained, we want to limit the total number of principle components used while maintaining a high amount of variance explained, so we will set the threshold for modeling to 90%. 
 
 ```{r}
-library(tidytext)
-
 tidied_pca %>%
   filter(component %in% paste0("PC", 1:4)) %>%
   group_by(component) %>%
@@ -373,9 +371,6 @@ Our EDA showed that a large number of the predictors were skewed, so we will cen
 ## Partitioning the Data
 
 ```{r}
-library(tidymodels)
-library(janitor)
-library(readxl)
 train_data<-as.data.frame(read_xlsx('C:\\Program Files\\GitHub\\predicting_ph\\data\\StudentData.xlsx'))
 #removing MFR
 train_data<-train_data%>%select(-MFR)%>%mutate(`Brand Code` = as.factor(`Brand Code`))
@@ -469,7 +464,6 @@ all_workflows<-
 We will use a racing method to tune the models. This will help us limit the overall computational burden by removing candidate tuning parameters quickly, therefore reducing the total amount of tuned models. 
 
 ```{r}
-library(finetune)
 race_ctrl<-
   control_race(
     save_pred = TRUE, 
