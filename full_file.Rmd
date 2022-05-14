@@ -264,7 +264,7 @@ Most of the predictors range is 1, but a minority are  much larger. Depending on
 
 ```{r}
 correlated_predictors<-findCorrelation(cor(train_data%>%select(-'Brand Code')), names = TRUE)
-
+correlated_predictors
 ```
 
 There are 6 highly correlated predictors and can be found in the `correlated_predictors` list
@@ -276,10 +276,9 @@ There are 6 highly correlated predictors and can be found in the `correlated_pre
 
 
 ```{r}
-pca_rec<-recipe(~., train_data%>%select(-'Brand Code')%>%select(-correlated_predictors))%>%
+pca_rec<-recipe(~., train_data%>%select(-'Brand Code'))%>%
   update_role(PH, new_role = 'id')%>%
-  step_center(all_predictors())%>%
-  step_scale(all_predictors())%>%
+  step_normalize(all_predictors())%>%
   step_pca(all_predictors())
 pca_prep<-prep(pca_rec)
 ```
@@ -503,7 +502,7 @@ best_results_rf<-
   race_results%>%
   extract_workflow_set_result('rf')%>%
   select_best(metric = 'rmse')
-best_results
+best_results_rf
 ```
 
 ```{r}
@@ -574,5 +573,50 @@ rf_test_results%>%
 ```
 
 
+Predictions against test data
 
+```{r}
+predictions = data.frame(ph = ph_test$ph)
+wkflow_models = race_results$wflow_id
+
+for (model in wkflow_models){
+  best_model = race_results%>%
+  extract_workflow_set_result(model)%>%
+  select_best(metric = 'rmse')
+ predictions[model] = race_results%>%
+  extract_workflow(model)%>%
+  finalize_workflow(best_model)%>%
+  fit(ph_train)%>%
+  predict(ph_test) 
+}
+
+predictions%>%head()
+```
+
+Based on RMSE, nearest_neighbor model performed the best on the test data
+
+```{r}
+performance = list('model' = c(), 'rmse' = c())
+for (model in wkflow_models){
+  rmse = RMSE(predictions['ph'][[1]],predictions[model][[1]])
+  performance$model = c(performance$model,model)
+  performance$rmse = c(performance$rmse,rmse)
+}
+
+performance_df = data.frame(performance)%>%
+  arrange(rmse)
+performance_df
+```
+
+```{r}
+knn_model = race_results%>%
+  extract_workflow('nearest_neighbor')%>%
+  finalize_workflow(best_results_knn)%>%
+  fit(ph_train)
+```
+
+
+```{r}
+predict(knn_model, test_data) 
+```
 
