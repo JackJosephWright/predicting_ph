@@ -24,7 +24,9 @@ library(caret)
 ## Load files
 
 ```{r}
-train_data<-openxlsx::read.xlsx('https://github.com/schoolkidrich/CUNY_MSDS/blob/main/DATA_624/project/StudentData.xlsx?raw=true', sep.names=' ')
+train_data<-openxlsx::read.xlsx('https://github.com/JackJosephWright/predicting_ph/blob/main/data/StudentData.xlsx?raw=true', sep.names=' ')
+
+test_data = openxlsx::read.xlsx('https://github.com/JackJosephWright/predicting_ph/blob/main/data/StudentEvaluation.xlsx?raw=true', sep.names=' ')
 
 train_data%>%head()
 ```
@@ -371,11 +373,9 @@ Our EDA showed that a large number of the predictors were skewed, so we will cen
 ## Partitioning the Data
 
 ```{r}
-train_data<-as.data.frame(read_xlsx('C:\\Program Files\\GitHub\\predicting_ph\\data\\StudentData.xlsx'))
 #removing MFR
 train_data<-train_data%>%select(-MFR)%>%mutate(`Brand Code` = as.factor(`Brand Code`))
 train_data<-train_data%>%clean_names()
-test_data<-read_xlsx('C:\\Program Files\\GitHub\\predicting_ph\\data\\StudentEvaluation.xlsx')
 test_data<-test_data%>%select(-MFR)
 test_data<-test_data%>%clean_names()
 ph_split<-initial_split(train_data%>%na.omit())
