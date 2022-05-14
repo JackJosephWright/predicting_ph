@@ -287,7 +287,7 @@ pca_prep<-prep(pca_rec)
 tidied_pca<-tidy(pca_prep, 2)
 
 tidied_pca%>%
-  filter(component %in% paste0('PC', 1:5))%>%
+  filter(terms %in% paste0('PC', 1:5))#%>%
   mutate(component = fct_inorder(component))%>%
   ggplot(aes(value,terms,fill = terms))+
   geom_col(show.legend = FALSE)+
@@ -295,6 +295,8 @@ tidied_pca%>%
   labs(y = NULL)
 
 ```
+
+
 ```{r}
 summary(prcomp(train_data%>%select(-`Brand Code`), scale = TRUE))
 ```

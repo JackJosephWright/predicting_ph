@@ -1,0 +1,252 @@
+---
+title: "Modeling_Jack"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Methodology
+
+Since the response variable is continuous, we will use a series of regression models as candidates. We will train a random forest and XGboost because they have proven historically to be excellent at modeling continuous variables. Our EDA pointed us towards some potential clustering in the principle components, so we will train a radial SVM. Our EDA didn't point us towards any terribly strong linear correlations, and the potential clustering from the EDA makes us want to throw in a KNN model just to be safe. 
+
+## Data Preparation
+
+From the *Missing Data* section, we have decided to drop `MFR` and listwise delete observations for `Filler Speed`. Some preliminary modeling showed that `Brand Code` was very responsive to imputation as well.  Since the dataset is fairly large and the remaining datapoints seem missing at random, we will drop the remaining observations with missing data. 
+
+
+
+Our EDA showed that a large number of the predictors were skewed, so we will center and scale the data for models that do not handle skew data or unscaled predictors well, like KNN or SVM. For the ensemble method, we will leave the data as is. 
+
+
+
+## Partitioning the Data
+
+```{r}
+library(tidymodels)
+library(janitor)
+library(readxl)
+train_data<-as.data.frame(read_xlsx('C:\\Program Files\\GitHub\\predicting_ph\\data\\StudentData.xlsx'))
+#removing MFR
+train_data<-train_data%>%select(-MFR)%>%mutate(`Brand Code` = as.factor(`Brand Code`))
+train_data<-train_data%>%clean_names()
+test_data<-read_xlsx('C:\\Program Files\\GitHub\\predicting_ph\\data\\StudentEvaluation.xlsx')
+test_data<-test_data%>%select(-MFR)
+test_data<-test_data%>%mutate(`Brand Code` = as.factor(`Brand Code`))%>%clean_names()%>%select(-c(ph, brand_code))%>%na.omit()
+final_split<-make_splits(train_data,test_data)
+ph_split<-initial_split(train_data%>%na.omit())
+ph_train<-training(ph_split)
+ph_test<-testing(ph_split)
+```
+
+
+
+
+## Data Preprocessing 
+
+```{r}
+# create base recipe with missing data handling
+base_rec<-
+  recipe(ph~., data = ph_train)%>%
+  #imputing brand code
+  
+  step_impute_bag(brand_code)%>%
+  step_unknown(brand_code)%>%
+  step_dummy(brand_code)#%>%
+  #omitting remaining missing data
+  #step_naomit(all_predictors())
+temp<-juice(prep(base_rec))
+# create centered and scaled data
+cs_rec<-
+  base_rec%>%
+  step_center%>%
+  step_scale()
+pca_rec<-
+  base_rec%>%
+  step_pca(threshold = .90)
+
+#create resamples
+ph_folds<-vfold_cv(ph_train)
+```
+
+
+## Create Models for Tuning
+
+```{r}
+svm_r_spec<-
+svm_rbf(cost = tune(), rbf_sigma = tune())%>%
+  set_engine('kernlab')%>%
+  set_mode('regression')
+knn_spec<-
+  nearest_neighbor(neighbors = tune(), dist_power = tune(), weight_func = tune())%>%
+  set_engine('kknn')%>%
+  set_mode('regression')
+boost_spec<-
+  boost_tree(mtry = tune(), min_n = tune(), trees = 1000)%>%
+  set_mode('regression')
+rf_spec<-
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000)%>%
+  set_engine('ranger', importance = 'impurity')%>%
+  set_mode('regression')
+```
+
+
+## Create the workflow set
+
+```{r}
+cc<-
+  workflow_set(
+    preproc = list(center_scale = cs_rec),
+    models  = list(SVM_radial = svm_r_spec, knn_spec)
+  )
+no_pre_proc<-
+  workflow_set(
+    preproc = list(base = base_rec),
+    models = list(boost = boost_spec, rf = rf_spec)
+  )
+pca_proc<-
+  workflow_set(
+    preproc = list(pca = pca_rec),
+    models = list(svm_pca = svm_r_spec , boost_pca = boost_spec , rf_pca = rf_spec , knn_pca = knn_spec)
+  )
+all_workflows<-
+  bind_rows(no_pre_proc, cc)%>%
+  mutate(wflow_id = gsub('(center_scale_)|(base_)|(pca_)', '',wflow_id))
+```
+
+
+## Tuning and Evaluating
+
+We will use a racing method to tune the models. This will help us limit the overall computational burden by removing candidate tuning parameters quickly, therefore reducing the total amount of tuned models. 
+
+```{r}
+library(finetune)
+race_ctrl<-
+  control_race(
+    save_pred = TRUE, 
+    parallel_over = 'everything',
+    save_workflow = TRUE
+  )
+race_results_time<-
+  system.time(
+    race_results<-
+      all_workflows%>%
+      workflow_map(
+        'tune_race_anova',
+        seed = 123,
+        resamples = ph_folds,
+        control = race_ctrl,
+        verbose = TRUE
+      )
+  )
+```
+
+```{r}
+race_results
+```
+
+```{r}
+autoplot(race_results)
+```
+```{r}
+collect_metrics(race_results)
+```
+```{r}
+race_results
+```
+
+```{r}
+best_results_rf<-
+  race_results%>%
+  extract_workflow_set_result('rf')%>%
+  select_best(metric = 'rmse')
+best_results
+```
+
+```{r}
+best_results_rf<-
+  race_results%>%
+  extract_workflow_set_result('rf')%>%
+  select_best(metric = 'rmse')
+rf_test_results<-
+  race_results%>%
+  extract_workflow('rf')%>%
+  finalize_workflow(best_results_rf)%>%
+  last_fit(split = ph_split)
+collect_metrics(rf_test_results)
+```
+
+
+```{r}
+best_results_boost<-
+  race_results%>%
+  extract_workflow_set_result('boost')%>%
+  select_best(metric = 'rmse')
+boost_test_results<-
+  race_results%>%
+  extract_workflow('boost')%>%
+  finalize_workflow(best_results_boost)%>%
+  last_fit(split = ph_split)
+collect_metrics(boost_test_results)
+```
+
+
+
+```{r}
+best_results_knn<-
+  race_results%>%
+  extract_workflow_set_result('nearest_neighbor')%>%
+  select_best(metric = 'rmse')
+knn_test_results<-
+  race_results%>%
+  extract_workflow('nearest_neighbor')%>%
+  finalize_workflow(best_results_knn)%>%
+  last_fit(split = ph_split)
+collect_metrics(knn_test_results)
+
+```
+
+```{r}
+best_results_knn<-
+  race_results%>%
+  extract_workflow_set_result('nearest_neighbor')%>%
+  select_best(metric = 'rmse')
+knn_test_results<-
+  race_results%>%
+  extract_workflow('nearest_neighbor')%>%
+  finalize_workflow(best_results_knn)%>%
+  last_fit(split = ph_split)
+collect_metrics(knn_test_results)
+
+```
+
+```{r}
+best_results_svm<-
+  race_results%>%
+  extract_workflow_set_result('SVM_radial')%>%
+  select_best(metric = 'rmse')
+svm_test_results<-
+  race_results%>%
+  extract_workflow('SVM_radial')%>%
+  finalize_workflow(best_results_svm)%>%
+  last_fit(split = ph_split)
+collect_metrics(svm_test_results)
+```
+```{r}
+
+```
+
+
+
+```{r}
+rf_test_results%>%
+  collect_predictions()%>%
+  ggplot(aes(x = ph, y = .pred))+
+  geom_abline(color = 'gray50', lty = 2)+
+  geom_point(alpha = .5)+
+  coord_obs_pred()+
+  labs(x = 'observed', y = 'predicted')
+```
+
+

@@ -1,0 +1,190 @@
+---
+title: "EDA"
+author: "Jack Wright"
+date: "4/29/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+train_data<-read_xlsx('./data/StudentData.xlsx')
+```
+
+
+## Data Structure
+
+```{r}
+glimpse(train_data)
+```
+
+
+There are 2571 observations of 32 predictors and the response (PH). All data are continuous besides the "Brand Code" which is unordered Categorical. 
+
+
+
+
+
+
+
+
+## Exploring the Response
+
+
+```{r}
+train_data<-train_data%>%na.omit()
+train_data%>%na.omit()%>%summarize(mean = mean(PH), "standard deviation" = sd(PH))
+```
+
+
+```{r}
+ggplot(train_data, aes(x = PH))+geom_histogram()+ggtitle('Distribution of Response')
+```
+
+
+
+
+## Exploring the predictors
+
+
+
+
+
+
+```{r}
+library(dplyr)
+library(psych)
+library(car)
+
+description<-psych::describe(train_data)
+```
+
+
+
+## Normality
+
+```{r}
+description%>%
+  filter((abs(skew)>=.5))%>%nrow()
+
+skew_list<-as.list(description%>%
+  filter((abs(skew)>=.5))%>%rownames())
+```
+
+
+21 of the 32 numeric predictors are skewed.
+
+skewed predictors can be found in the list `skew_list`
+
+```{r}
+ggplot(description, aes(x=range))+geom_histogram()+ggtitle('Ranges of Predictors')
+```
+
+
+
+
+Most of the predictors range is 1, but a minority are  much larger. Depending on the model this data will need to be `centered` and `scaled`
+
+
+
+## Highly Correlated Predictor Pairs
+
+```{r}
+library(caret)
+correlated_predictors<-findCorrelation(cor(train_data%>%select(-'Brand Code')), names = TRUE)
+
+```
+
+There are 6 highly correlated predictors and can be found in the `correlated_predictors` list
+
+
+
+## PCA
+
+
+
+```{r}
+library(tidymodels)
+pca_rec<-recipe(~., train_data%>%select(-'Brand Code')%>%select(-correlated_predictors))%>%
+  update_role(PH, new_role = 'id')%>%
+  step_center(all_predictors())%>%
+  step_scale(all_predictors())%>%
+  step_pca(all_predictors())
+pca_prep<-prep(pca_rec)
+```
+
+
+
+```{r}
+
+tidied_pca<-tidy(pca_prep, 2)
+
+tidied_pca%>%
+  filter(component %in% paste0('PC', 1:5))%>%
+  mutate(component = fct_inorder(component))%>%
+  ggplot(aes(value,terms,fill = terms))+
+  geom_col(show.legend = FALSE)+
+  facet_wrap(~component,nrow=1)+
+  labs(y = NULL)
+
+```
+```{r}
+summary(prcomp(train_data%>%select(-`Brand Code`), scale = TRUE))
+```
+
+Looking at the percent of variance explained, we want to limit the total number of principle components used while maintaining a high amount of variance explained, so we will set the threshold for modeling to 90%. 
+
+```{r}
+library(tidytext)
+
+tidied_pca %>%
+  filter(component %in% paste0("PC", 1:4)) %>%
+  group_by(component) %>%
+  top_n(8, abs(value)) %>%
+  ungroup() %>%
+  mutate(terms = reorder_within(terms, abs(value), component)) %>%
+  ggplot(aes(abs(value), terms, fill = value > 0)) +
+  geom_col() +
+  facet_wrap(~component, scales = "free_y") +
+  scale_y_reordered() +
+  labs(
+    x = "Absolute value of contribution",
+    y = NULL, fill = "Positive?"
+  )
+```
+
+PCA 1 looks like it has a lot to do with pressure, as the positive elements are `Mnf Flow` `Hyd Pressure2` `Fill Pressure` and `Pressure Setpoint` , the negative elements are `Pressure Vaccum`and `Filler Level`. In this context positive means that as that variable increases we move in a positive direction along this principle component, while negative means that when that variable increases we move in the negative direction along that principle component. 
+
+PCA 2 looks like it has a lot to do with the Carb, 
+
+
+
+Now lets look at how these features are distributed in the plane of the first two Principle Components
+
+```{r}
+temp<-juice(pca_prep)%>%mutate(case_mean = case_when(PH > mean(PH)~TRUE, TRUE ~FALSE))
+temp%>%
+  ggplot(aes(PC1,PC2, label = PH, color = case_mean))+
+  geom_point(alpha = .2)+
+  geom_text(check_overlap = TRUE, family = 'IBMlexSans')+
+  ggtitle('PH higher or lower than the mean along PC1 vs PC2')
+```
+
+
+
+
+
+There does seem to be some grouping in the PC1 vs PC2 plane, we could try some sort of `radial SVM` to model this. 
+
+
+
+
+
+
+
