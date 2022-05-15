@@ -508,6 +508,7 @@ best_results_rf<-
 best_results_rf
 ```
 
+
 ```{r}
 best_results_rf<-
   race_results%>%
@@ -576,6 +577,36 @@ rf_test_results%>%
   labs(x = 'observed', y = 'predicted')
 ```
 
+Linear Regression
+
+```{r}
+high_corr = findCorrelation(cor(ph_train%>%select(-'brand_code')), names = TRUE)
+linear_model = lm(ph~.,ph_train%>%select(-c('brand_code',high_corr)))
+lm_pred = predict(linear_model,ph_test)
+RMSE(ph_test$ph,lm_pred)
+
+```
+
+PCR
+
+```{r}
+
+apply_pca = function(pca_model,data){
+  pca_data = data.frame(predict(pca_model,data))
+  pca_data$ph = data['ph'][[1]]
+  return(pca_data)
+}
+pca_model = prcomp(ph_train%>%select(-c(brand_code,ph)),scale=TRUE)
+
+ph_pca_train = apply_pca(pca_model, ph_train)
+pcr_model = lm(ph~.,data = ph_pca_train)
+
+
+
+pcr_pred = predict(pcr_model,apply_pca(pca_model,ph_test))
+RMSE(ph_test$ph,pcr_pred)
+
+```
 
 Predictions against test data
 
