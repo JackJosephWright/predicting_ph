@@ -178,7 +178,7 @@ final_fit%>%
 
 ## Remaining Missing Data
 
-dropping `MFR` and imputing `Brand Codes` accounts for 90% of the missing data, the most conservative method would be to listwise delete the remaining missing data. 
+dropping `MFR` and imputing `Brand Codes` accounts for 90% of the missing data, the most conservative method would be to listwise delete the remaining missing data. However, we did note that there is missing data in the test set. In order to minimize leakage of bias from the training to the test set, we will impute the training set with the mean values of the test set. 
 
 
 
@@ -395,7 +395,8 @@ base_rec<-
   
   step_impute_bag(brand_code)%>%
   step_unknown(brand_code)%>%
-  step_dummy(brand_code)#%>%
+  step_dummy(brand_code)%>%
+  step_impute_bag(all_predictors())
   #omitting remaining missing data
   #step_naomit(all_predictors())
 temp<-juice(prep(base_rec))
@@ -409,7 +410,7 @@ pca_rec<-
   step_pca(threshold = .90)
 
 #create resamples
-ph_folds<-vfold_cv(ph_train)
+ph_folds<-vfold_cv(ph_train,v = 5)
 ```
 
 
@@ -425,10 +426,10 @@ knn_spec<-
   set_engine('kknn')%>%
   set_mode('regression')
 boost_spec<-
-  boost_tree(mtry = tune(), min_n = tune(), trees = 1000)%>%
+  boost_tree(mtry = tune(), min_n = tune(), trees = 100)%>%
   set_mode('regression')
 rf_spec<-
-  rand_forest(mtry = tune(), min_n = tune(), trees = 1000)%>%
+  rand_forest(mtry = tune(), min_n = tune(), trees = 100)%>%
   set_engine('ranger', importance = 'impurity')%>%
   set_mode('regression')
 ```
@@ -493,6 +494,8 @@ autoplot(race_results)
 ```{r}
 collect_metrics(race_results)
 ```
+
+
 ```{r}
 race_results
 ```
@@ -517,6 +520,7 @@ rf_test_results<-
   last_fit(split = ph_split)
 collect_metrics(rf_test_results)
 ```
+
 
 
 ```{r}
@@ -620,3 +624,14 @@ knn_model = race_results%>%
 predict(knn_model, test_data) 
 ```
 
+
+## Final Prediction
+
+```{r}
+test<-
+  race_results%>%
+  extract_workflow('rf')%>%
+  finalize_workflow(best_results_rf)%>%
+  fit(train_data)
+predict(test, test_data)
+```
