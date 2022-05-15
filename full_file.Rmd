@@ -1,12 +1,15 @@
 ---
 title: "Predicting PH"
-author: "Jack Wright","Richard Zheng","Mario Pena"
+author: "Jack Wright, Richard Zheng, Mario Pena"
 date: "4/29/2022"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
 ---
 
+## Load Packages
 
-```{r, include=FALSE}
+```{r}
 library(tidytext)
 library(tidyverse)
 library(readxl)
@@ -182,13 +185,6 @@ dropping `MFR` and imputing `Brand Codes` accounts for 90% of the missing data, 
 
 
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-
-```
-
-
-
 ## Data Structure
 
 ```{r}
@@ -345,15 +341,6 @@ temp%>%
 
 There does seem to be some grouping in the PC1 vs PC2 plane, we could try some sort of `radial SVM` to model this. 
 
-
-
-
-
-
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
 
 ## Methodology
 
@@ -581,10 +568,7 @@ Linear Regression
 
 ```{r}
 high_corr = findCorrelation(cor(ph_train%>%select(-'brand_code')), names = TRUE)
-linear_model = lm(ph~.,ph_train%>%select(-c('brand_code',high_corr)))
-lm_pred = predict(linear_model,ph_test)
-RMSE(ph_test$ph,lm_pred)
-
+linear_model = lm(ph~.,ph_train%>%select(-c('brand_code',all_of(high_corr))))
 ```
 
 PCR
@@ -600,12 +584,6 @@ pca_model = prcomp(ph_train%>%select(-c(brand_code,ph)),scale=TRUE)
 
 ph_pca_train = apply_pca(pca_model, ph_train)
 pcr_model = lm(ph~.,data = ph_pca_train)
-
-
-
-pcr_pred = predict(pcr_model,apply_pca(pca_model,ph_test))
-RMSE(ph_test$ph,pcr_pred)
-
 ```
 
 Predictions against test data
@@ -625,14 +603,19 @@ for (model in wkflow_models){
   predict(ph_test) 
 }
 
+predictions$linear_regression = predict(linear_model,ph_test)
+predictions$PCR = predict(pcr_model,apply_pca(pca_model,ph_test))
+
 predictions%>%head()
 ```
 
-Based on RMSE, nearest_neighbor model performed the best on the test data
+Based on RMSE, KNN model performed the best on the data
 
 ```{r}
 performance = list('model' = c(), 'rmse' = c())
-for (model in wkflow_models){
+models_used = names(predictions%>%select(-ph))
+
+for (model in models_used){
   rmse = RMSE(predictions['ph'][[1]],predictions[model][[1]])
   performance$model = c(performance$model,model)
   performance$rmse = c(performance$rmse,rmse)
@@ -650,19 +633,17 @@ knn_model = race_results%>%
   fit(ph_train)
 ```
 
-
-```{r}
-predict(knn_model, test_data) 
-```
-
-
 ## Final Prediction
 
+Since KNN performed the best, we will be using that model to predict on the test data
+
 ```{r}
-test<-
-  race_results%>%
-  extract_workflow('rf')%>%
-  finalize_workflow(best_results_rf)%>%
-  fit(train_data)
-predict(test, test_data)
+test_data['ph'] = predict(knn_model, test_data)
+test_data%>%head()
 ```
+
+```{r}
+write.csv(test_data,'StudentPredictions.csv',row.names = FALSE)
+```
+
+
